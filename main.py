@@ -47,6 +47,49 @@ st.markdown("""
         border: 1px solid rgba(255,255,255,0.08);
     }
 
+    .record-card-hot {
+        background: linear-gradient(135deg, #3a0a0a, #7a1a00);
+        border-radius: 20px;
+        padding: 1.6rem 2rem;
+        margin: 0.6rem 0;
+        box-shadow: 0 8px 32px rgba(255,80,0,0.25);
+        border: 1px solid rgba(255,120,0,0.3);
+    }
+
+    .record-card-cold {
+        background: linear-gradient(135deg, #0a1a3a, #00337a);
+        border-radius: 20px;
+        padding: 1.6rem 2rem;
+        margin: 0.6rem 0;
+        box-shadow: 0 8px 32px rgba(0,120,255,0.25);
+        border: 1px solid rgba(0,180,255,0.3);
+    }
+
+    .record-label {
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 2px;
+        margin-bottom: 0.5rem;
+    }
+
+    .record-temp {
+        font-size: 3.8rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .record-date {
+        font-size: 1.05rem;
+        margin-top: 0.5rem;
+        color: #ddd;
+    }
+
+    .record-detail {
+        font-size: 0.85rem;
+        color: #aaa;
+        margin-top: 0.3rem;
+    }
+
     .rank-badge {
         text-align: center;
         font-size: 1rem;
@@ -124,6 +167,24 @@ st.markdown("""
         padding: 0.6rem 1rem;
         border-radius: 10px;
     }
+
+    .section-header {
+        font-size: 1.3rem;
+        font-weight: 900;
+        margin: 2rem 0 0.8rem 0;
+        padding-left: 0.3rem;
+    }
+
+    .top5-row {
+        background: rgba(255,255,255,0.04);
+        border-radius: 10px;
+        padding: 0.5rem 1rem;
+        margin: 0.3rem 0;
+        font-size: 0.9rem;
+        color: #ccc;
+        display: flex;
+        justify-content: space-between;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -150,7 +211,6 @@ df = load_data()
 # 유틸 함수
 # ────────────────────────────────────────────
 def get_rank_emoji(percentile_top):
-    """상위 퍼센타일 기준 이모지 반환"""
     if percentile_top <= 1:
         return "🏆", "역대 최상위권"
     elif percentile_top <= 5:
@@ -165,7 +225,6 @@ def get_rank_emoji(percentile_top):
         return "❄️", "하위권"
 
 def get_temp_color(temp):
-    """기온에 따른 색상 반환"""
     if temp >= 35:
         return "#FF2D2D"
     elif temp >= 30:
@@ -192,13 +251,11 @@ def get_bar_color(temp):
         return "linear-gradient(90deg, #81D4FA, #29B6F6)"
 
 def compute_period_avg(df, start, end):
-    """기간 평균 계산 및 전체 기간 대비 순위 반환"""
     mask = (df['날짜'] >= pd.Timestamp(start)) & (df['날짜'] <= pd.Timestamp(end))
     period_df = df[mask]
     if period_df.empty:
         return None
 
-    # 같은 월-일 범위로 연도별 평균 계산 (역대 같은 시기 비교)
     all_months_days = period_df['날짜'].apply(lambda x: (x.month, x.day))
     month_day_list = list(set(all_months_days))
 
@@ -228,12 +285,25 @@ def compute_period_avg(df, start, end):
             'rank': int(rank),
             'total': int(total),
             'percentile_top': percentile_top,
-            'all_values': sorted_vals.tolist()
         }
 
     result['days'] = len(period_df)
-    result['start'] = start
-    result['end'] = end
+
+    # ── 선택 기간 내 일별 최고/최저 날짜 ──
+    hottest_idx = period_df['최고기온'].idxmax()
+    coldest_idx = period_df['최저기온'].idxmin()
+    result['기간_최고'] = {
+        'temp': period_df.loc[hottest_idx, '최고기온'],
+        'date': period_df.loc[hottest_idx, '날짜'],
+        'avg': period_df.loc[hottest_idx, '평균기온'],
+        'low': period_df.loc[hottest_idx, '최저기온'],
+    }
+    result['기간_최저'] = {
+        'temp': period_df.loc[coldest_idx, '최저기온'],
+        'date': period_df.loc[coldest_idx, '날짜'],
+        'avg': period_df.loc[coldest_idx, '평균기온'],
+        'high': period_df.loc[coldest_idx, '최고기온'],
+    }
     return result
 
 def render_rank_card(label, icon, data):
@@ -256,21 +326,103 @@ def render_rank_card(label, icon, data):
         <div class="temp-value" style="color:{color};">{val}°C</div>
         <div class="temp-label">해당 기간 {label}</div>
         <div class="percentile-bar-bg">
-            <div style="width:{bar_width}%; height:100%; background:{bar_color}; border-radius:50px; transition: width 1s ease;"></div>
+            <div style="width:{bar_width}%; height:100%; background:{bar_color}; border-radius:50px;"></div>
         </div>
         <div style="text-align:center; font-size:0.82rem; color:#aaa;">← 낮음 &nbsp;&nbsp; 높음 →</div>
         <div class="info-box">
-            🏷️ <b>{badge_text}</b> &nbsp;|&nbsp;
-            📅 역대 같은 기간과 비교한 결과입니다.
+            🏷️ <b>{badge_text}</b> &nbsp;|&nbsp; 역대 같은 기간과 비교한 결과입니다.
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+def render_record_cards_period(hot, cold):
+    """선택 기간 내 최고/최저 날짜 카드"""
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="record-card-hot">
+            <div class="record-label" style="color:#FF6B35;">🔥 이 기간 가장 더운 날</div>
+            <div class="record-temp" style="color:#FF2D2D;">{hot['temp']}°C</div>
+            <div class="record-date">📅 {hot['date'].strftime('%Y년 %m월 %d일')}</div>
+            <div class="record-detail">평균 {hot['avg']}°C &nbsp;|&nbsp; 최저 {hot['low']}°C</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class="record-card-cold">
+            <div class="record-label" style="color:#4FC3F7;">❄️ 이 기간 가장 추운 날</div>
+            <div class="record-temp" style="color:#81D4FA;">{cold['temp']}°C</div>
+            <div class="record-date">📅 {cold['date'].strftime('%Y년 %m월 %d일')}</div>
+            <div class="record-detail">평균 {cold['avg']}°C &nbsp;|&nbsp; 최고 {cold['high']}°C</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def render_alltime_records(df):
+    """역대 전체 최고/최저 기온 TOP 5"""
+    st.markdown('<div class="section-header">🏅 역대 서울 기온 기록</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    # 역대 최고기온 TOP5
+    top5_hot = df.nlargest(5, '최고기온')[['날짜', '최고기온', '평균기온', '최저기온']].reset_index(drop=True)
+    # 역대 최저기온 TOP5
+    top5_cold = df.nsmallest(5, '최저기온')[['날짜', '최저기온', '평균기온', '최고기온']].reset_index(drop=True)
+
+    with col1:
+        hot_row = top5_hot.iloc[0]
+        st.markdown(f"""
+        <div class="record-card-hot">
+            <div class="record-label" style="color:#FF6B35;">🔥 역대 최고기온 1위</div>
+            <div class="record-temp" style="color:#FF2D2D;">{hot_row['최고기온']}°C</div>
+            <div class="record-date">📅 {hot_row['날짜'].strftime('%Y년 %m월 %d일')}</div>
+            <div class="record-detail">평균 {hot_row['평균기온']}°C &nbsp;|&nbsp; 최저 {hot_row['최저기온']}°C</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("🔥 역대 최고기온 TOP 5 전체보기"):
+            for i, row in top5_hot.iterrows():
+                medal = ["🥇","🥈","🥉","4️⃣","5️⃣"][i]
+                st.markdown(f"""
+                <div class="top5-row">
+                    <span>{medal} {row['날짜'].strftime('%Y.%m.%d')}</span>
+                    <span style="color:#FF6B35; font-weight:700;">{row['최고기온']}°C</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+    with col2:
+        cold_row = top5_cold.iloc[0]
+        st.markdown(f"""
+        <div class="record-card-cold">
+            <div class="record-label" style="color:#4FC3F7;">❄️ 역대 최저기온 1위</div>
+            <div class="record-temp" style="color:#81D4FA;">{cold_row['최저기온']}°C</div>
+            <div class="record-date">📅 {cold_row['날짜'].strftime('%Y년 %m월 %d일')}</div>
+            <div class="record-detail">평균 {cold_row['평균기온']}°C &nbsp;|&nbsp; 최고 {cold_row['최고기온']}°C</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("❄️ 역대 최저기온 TOP 5 전체보기"):
+            for i, row in top5_cold.iterrows():
+                medal = ["🥇","🥈","🥉","4️⃣","5️⃣"][i]
+                st.markdown(f"""
+                <div class="top5-row">
+                    <span>{medal} {row['날짜'].strftime('%Y.%m.%d')}</span>
+                    <span style="color:#4FC3F7; font-weight:700;">{row['최저기온']}°C</span>
+                </div>
+                """, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────
 # UI 메인
 # ────────────────────────────────────────────
 st.markdown('<div class="main-title">🌡️ 서울 기온 랭킹</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">1907년부터 현재까지 · 서울 기상 관측 데이터 기반</div>', unsafe_allow_html=True)
+
+# ── 역대 기록 섹션 (항상 표시) ──
+render_alltime_records(df)
+
+st.markdown("---")
+
+# ── 기간 선택 섹션 ──
+st.markdown('<div class="section-header">📅 기간별 순위 분석</div>', unsafe_allow_html=True)
 
 min_date = df['날짜'].min().date()
 max_date = df['날짜'].max().date()
@@ -313,6 +465,12 @@ if st.button("🔍 순위 분석하기", use_container_width=True, type="primary
     else:
         st.success(f"✅ 분석 완료! 총 {result['days']}일 데이터 기준")
 
+        # 기간 내 최고/최저 날짜
+        st.markdown('<div class="section-header">🌡️ 이 기간의 극값</div>', unsafe_allow_html=True)
+        render_record_cards_period(result['기간_최고'], result['기간_최저'])
+
+        # 역대 순위 카드
+        st.markdown('<div class="section-header">📊 역대 같은 시기 대비 순위</div>', unsafe_allow_html=True)
         render_rank_card("평균기온", "🌡️", result['평균기온'])
         render_rank_card("최고기온", "🔥", result['최고기온'])
         render_rank_card("최저기온", "❄️", result['최저기온'])
@@ -320,7 +478,7 @@ if st.button("🔍 순위 분석하기", use_container_width=True, type="primary
         with st.expander("📖 분석 방법 보기"):
             st.markdown("""
             - **비교 방식**: 선택한 기간의 **월-일 범위**를 기준으로, 1907년부터 현재까지 **같은 시기 연도별 평균**과 비교합니다.
-            - 예: 7월 1일~7월 31일을 선택하면, 역대 모든 연도의 7월 평균기온과 비교합니다.
+            - 예: 7월 1일~7월 31일 선택 → 역대 모든 연도의 7월 평균과 비교
             - **순위 1위** = 역대 가장 높은 기온을 기록한 해
             - 데이터 출처: 기상청 서울(지점 108) 일별 관측 자료
             """)
